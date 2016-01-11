@@ -5,5 +5,11 @@
   "dependencies": {
     "express": "",
     "request": ""
+  },
+  "engines": {
+    "node": "5.4.0"
+  },
+  "scripts": {
+    "start": "node main.js"
   }
 }
