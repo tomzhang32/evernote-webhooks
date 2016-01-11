@@ -2,9 +2,11 @@
   "name": "evernote-webhooks",
   "version": "0.0.1",
   "description": "Using webhooks in Evernote to do things",
+  "private": "true",
   "dependencies": {
-    "express": "",
-    "request": ""
+    "evernote": "^1.25.82",
+    "express": "^4.13.3",
+    "request": "^2.67.0"
   },
   "engines": {
     "node": "5.4.0"
