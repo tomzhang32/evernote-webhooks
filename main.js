@@ -3,6 +3,7 @@
  */
 var express = require('express');
 var Evernote = require('evernote').Evernote;
+var session = require('express-session');
 var config;
 try {
   config = require('./config.json');
@@ -26,14 +27,14 @@ app.get('/OAuth', function(req, res) {
     sandbox: config.SANDBOX
   });
 
-  client.getRequestToken('/foo', function(error, oauthToken, oauthTokenSecret, results){
+  client.getRequestToken('/', function(error, oauthToken, oauthTokenSecret, results){
     if (error) {
       console.log(JSON.stringify(error));
       res.send(error.data);
     } else { 
       // store the tokens in the session
-      req.session.oauthToken = oauthToken;
-      req.session.oauthTokenSecret = oauthTokenSecret;
+      session.oauthToken = oauthToken;
+      session.oauthTokenSecret = oauthTokenSecret;
 
       // redirect the user to authorize the token
       res.redirect(client.getAuthorizeUrl(oauthToken));
