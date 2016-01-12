@@ -2,7 +2,6 @@
  * Evernote-webhooks: A project to use webhooks to automate things in Evernote
  */
 var express = require('express');
-var config = require('./config.json');
 
 var app = express();
 var consumerKey = process.env.consumerKey;
