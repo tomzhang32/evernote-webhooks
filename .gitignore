@@ -33,3 +33,6 @@ config.json
 .project
 .settings
 RemoteSystemsTempFiles
+
+# OS X stuff
+.DS_Store
