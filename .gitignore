@@ -28,3 +28,8 @@ node_modules
 
 # Configuration stuff
 config.json
+
+# Eclipse stuff
+.project
+.settings
+RemoteSystemsTempFiles
