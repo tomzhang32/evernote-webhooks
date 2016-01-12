@@ -8,7 +8,7 @@ var consumerKey = process.env.consumerKey;
 var consumerSecret = process.env.consumerSecret;
 var wwwDir = "/www";
 app.use("/", express.static(__dirname + wwwDir));
-app.get("/", function(req, res) { res.send(wwwDir + "/index.html?consumerKey=" + consumerKey);});
+app.get("/", function(req, res) { res.send("Consumer key: " + consumerKey);});
 // Start the server on port 3000 or the server port.
 var port = process.env.PORT || 3000;
 console.log("PORT: " + port);
