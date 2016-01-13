@@ -28,6 +28,20 @@ app.use(expressSession({
 }));
 app.use('/', express.static(__dirname + wwwDir));
 
+app.get('/', function(req, res) { res.render(wwwDir + '/index.html'); });
+
+app.get('/error', function(req, res) {
+  console.log('/error');
+  console.log(req.session);
+  res.send('An error occurred. <a href="http://www.sadtrombone.com/?autoplay=true">Womp womp</a>');
+});
+
+app.get('/hook', function(req, res) {
+  console.log('/hook');
+  console.log(req.query);
+  res.send(req.query);
+});
+
 app.get('/OAuth', function(req, res) {
   console.log('/OAuth');
   var client = new Evernote.Client({
@@ -72,6 +86,7 @@ app.get('/OAuthCallback', function(req, res) {
         res.redirect('/error');
       } else {
         // store the access token in the session
+        // TODO: Store the access token somewhere else
         req.session.oauthAccessToken = oauthAccessToken;
         req.session.oauthAccessTtokenSecret = oauthAccessTokenSecret;
         req.session.edamShard = results.edam_shard;
@@ -88,16 +103,8 @@ app.get('/OAuthCallback', function(req, res) {
 app.get('/OAuthDone', function(req, res) {
   console.log('/OAuthDone');
   console.log(req.session);
-  res.send("OAuth complete!");
+  res.send('OAuth complete!');
 });
-
-app.get('/error', function(req, res) {
-  console.log('/error');
-  console.log(req.session);
-  res.send('An error occurred. <a href="http://www.sadtrombone.com/?autoplay=true">Womp womp</a>');
-});
-
-app.get('/', function(req, res) { res.render(wwwDir + '/index.html');});
 
 // Start the server on port 3000 or the server port.
 var port = process.env.PORT || 3000;
