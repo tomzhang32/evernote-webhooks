@@ -19,7 +19,7 @@ config.SERVICE_BASE = config.SERVICE_BASE || process.env.serviceBase;
 var oauthCallbackUrl = config.SERVICE_BASE + '/OAuthCallback';
 
 var app = express();
-var wwwDir = "/www";
+var wwwDir = '/www';
 
 app.use(expressSession({
   resave: false,
@@ -29,6 +29,7 @@ app.use(expressSession({
 app.use('/', express.static(__dirname + wwwDir));
 
 app.get('/OAuth', function(req, res) {
+  console.log('/OAuth');
   var client = new Evernote.Client({
     consumerKey: config.API_CONSUMER_KEY,
     consumerSecret: config.API_CONSUMER_SECRET,
@@ -53,6 +54,7 @@ app.get('/OAuth', function(req, res) {
 });
 
 app.get('/OAuthCallback', function(req, res) {
+  console.log('/OAuthCallback');
   var client = new Evernote.Client({
     consumerKey: config.API_CONSUMER_KEY,
     consumerSecret: config.API_CONSUMER_SECRET,
@@ -84,10 +86,14 @@ app.get('/OAuthCallback', function(req, res) {
 });
 
 app.get('/OAuthDone', function(req, res) {
-  res.send("OAuth complete! Access token: " + req.session.oauthAccessToken);
+  console.log('/OAuthDone');
+  console.log(req.session);
+  res.send("OAuth complete!");
 });
 
 app.get('/error', function(req, res) {
+  console.log('/error');
+  console.log(req.session);
   res.send('An error occurred. <a href="http://www.sadtrombone.com/?autoplay=true">Womp womp</a>');
 });
 
