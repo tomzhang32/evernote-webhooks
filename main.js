@@ -8,12 +8,15 @@ var config;
 try {
   config = require('./config.json');
 } catch (e) {
-  config = {
-    API_CONSUMER_KEY: process.env.consumerKey,
-    API_CONSUMER_SECRET: process.env.consumerSecret,
-    SANDBOX: true
-  };
+  config = {};
 }
+
+config.API_CONSUMER_KEY = config.API_CONSUMER_KEY || process.env.consumerKey;
+config.API_CONSUMER_SECRET = config.API_CONSUMER_SECRET || process.env.consumerSecret;
+config.SANDBOX = config.SANDBOX || true;
+config.SERVICE_BASE = config.SERVICE_BASE || process.env.serviceBase;
+
+var oauthCallbackUrl = config.SERVICE_BASE + '/OAuthCallback';
 
 var app = express();
 var wwwDir = "/www";
@@ -31,22 +34,22 @@ app.get('/OAuth', function(req, res) {
     consumerSecret: config.API_CONSUMER_SECRET,
     sandbox: config.SANDBOX
   });
-  console.log(req.session);
 
-  client.getRequestToken('/OAuthCallback', function(error, oauthToken, oauthTokenSecret, results){
-    if (error) {
-      console.log(JSON.stringify(error));
-      res.send(error.data);
-    } else { 
-      // store the tokens in the session
-      req.session.hasRequestToken = true;
-      req.session.oauthToken = oauthToken;
-      req.session.oauthTokenSecret = oauthTokenSecret;
+  client.getRequestToken(oauthCallbackUrl,
+    function(error, oauthRequestToken, oauthRequestTokenSecret, results){
+      if (error) {
+        console.log(JSON.stringify(error));
+        res.send(error.data);
+      } else {
+        // store the tokens in the session
+        req.session.oauthRequestToken = oauthRequestToken;
+        req.session.oauthRequestTokenSecret = oauthRequestTokenSecret;
 
-      // redirect the user to authorize the token
-      res.redirect(client.getAuthorizeUrl(oauthToken));
+        // redirect the user to authorize the token
+        res.redirect(client.getAuthorizeUrl(oauthRequestToken));
+      }
     }
-  });
+  );
 });
 
 app.get('/OAuthCallback', function(req, res) {
@@ -55,17 +58,16 @@ app.get('/OAuthCallback', function(req, res) {
     consumerSecret: config.API_CONSUMER_SECRET,
     sandbox: config.SANDBOX
   });
-  console.log(req.session);
 
   client.getAccessToken(
-    req.session.oauthToken,
-    req.session.oauthTokenSecret,
-    req.param('oauth_verifier'),
+    req.session.oauthRequestToken,
+    req.session.oauthRequestTokenSecret,
+    req.query['oauth_verifier'],
     function(error, oauthAccessToken, oauthAccessTokenSecret, results) {
-      if(error) {
+      if (error) {
         console.log('error');
         console.log(error);
-        res.redirect('/');
+        res.redirect('/error');
       } else {
         // store the access token in the session
         req.session.oauthAccessToken = oauthAccessToken;
@@ -75,10 +77,18 @@ app.get('/OAuthCallback', function(req, res) {
         req.session.edamExpires = results.edam_expires;
         req.session.edamNoteStoreUrl = results.edam_noteStoreUrl;
         req.session.edamWebApiUrlPrefix = results.edam_webApiUrlPrefix;
-        res.redirect('/');
+        res.redirect('/OAuthDone');
       }
     }
   );
+});
+
+app.get('/OAuthDone', function(req, res) {
+  res.send("OAuth complete! Access token: " + req.session.oauthAccessToken);
+});
+
+app.get('/error', function(req, res) {
+  res.send('An error occurred. <a href="http://www.sadtrombone.com/?autoplay=true">Womp womp</a>');
 });
 
 app.get('/', function(req, res) { res.render(wwwDir + '/index.html');});
