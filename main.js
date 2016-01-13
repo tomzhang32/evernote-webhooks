@@ -4,6 +4,8 @@
 var express = require('express');
 var Evernote = require('evernote').Evernote;
 var expressSession = require('express-session');
+var UsersMap = require('./UsersMap');
+
 var config;
 try {
   config = require('./config.json');
@@ -17,6 +19,8 @@ config.SANDBOX = config.SANDBOX || true;
 config.SERVICE_BASE = config.SERVICE_BASE || process.env.serviceBase;
 
 var oauthCallbackUrl = config.SERVICE_BASE + '/OAuthCallback';
+
+var usersMap = new UsersMap();
 
 var app = express();
 var wwwDir = '/www';
@@ -86,14 +90,14 @@ app.get('/OAuthCallback', function(req, res) {
         res.redirect('/error');
       } else {
         // store the access token in the session
-        // TODO: Store the access token somewhere else
-        req.session.oauthAccessToken = oauthAccessToken;
-        req.session.oauthAccessTtokenSecret = oauthAccessTokenSecret;
-        req.session.edamShard = results.edam_shard;
-        req.session.edamUserId = results.edam_userId;
-        req.session.edamExpires = results.edam_expires;
-        req.session.edamNoteStoreUrl = results.edam_noteStoreUrl;
-        req.session.edamWebApiUrlPrefix = results.edam_webApiUrlPrefix;
+        usersMap.addUser(results.edam_userId, oauthAccessToken, oauthAccessTokenSecret,
+          results.edam_expires);
+        usersMap.setShardForUser(results.edam_userId, results.edam_shard);
+        usersMap.setNoteStoreUrlForUser(results.edam_userId, results.edam_noteStoreUrl);
+        usersMap.setWebApiUrlPrefixForUser(results.edam_userId,
+          results.edam_webApiUrlPrefix);
+
+        req.session.oauthDone = true;
         res.redirect('/OAuthDone');
       }
     }
@@ -101,9 +105,12 @@ app.get('/OAuthCallback', function(req, res) {
 });
 
 app.get('/OAuthDone', function(req, res) {
-  console.log('/OAuthDone');
-  console.log(req.session);
-  res.send('OAuth complete!');
+  console.log('/OAuthDone: ' + req.session.oauthDone);
+  if (req.session.oauthDone) {
+    res.send('OAuth complete!');
+  } else {
+    res.send('Error with OAuth; check the logs.');
+  }
 });
 
 // Start the server on port 3000 or the server port.
