@@ -17,17 +17,24 @@ config.API_CONSUMER_KEY = config.API_CONSUMER_KEY || process.env.consumerKey;
 config.API_CONSUMER_SECRET = config.API_CONSUMER_SECRET || process.env.consumerSecret;
 config.SANDBOX = config.SANDBOX || true;
 config.SERVICE_BASE = config.SERVICE_BASE || process.env.serviceBase;
+config.TARGET_TAG_NAME = 'toc';
 
 var oauthCallbackUrl = config.SERVICE_BASE + '/OAuthCallback';
 
 var usersMap = new UsersMap();
 var history = [];
-var resultSpec = new Evernote.NotesMetadataResultSpec({
-  includeTitle: true,
-  includeNotebookGuid: true,
-  includeDeleted: true,
-  includeAttributes: true
-});
+
+/**
+ * Function to log an error and send it to res, or redirect to some target url
+ */
+var errorLogger = function(res, error, targetUrl) {
+  console.log(error);
+  if (typeof targetUrl === 'string') {
+    res.redirect(targetUrl);
+  } else {
+    res.send(error);
+  }
+}
 
 var app = express();
 var wwwDir = '/www';
@@ -56,7 +63,47 @@ app.get('/error', function(req, res) {
 app.get('/hook', function(req, res) {
   console.log('/hook');
   history.push(req.query);
-  res.send(req.query);
+  if (req.query && req.query.userId && req.query.guid
+    && (req.query.reason === 'update' || req.query.reason === 'business_update')) {
+    // TODO: Do we really need to check the reason? Is just having the guid enough?
+    //   (ie, in case a client adds a note with a tag)
+    // Retrieve the note name stored in session if we have saved it
+    // TODO: Delete this when we don't need to fake our hooks
+    var noteTitle = '';
+    if (req.query.guid === req.session.noteGuid) {
+      noteTitle = req.session.noteTitle;
+    }
+
+    // Look up this userID and get note info for this note
+    var userInfo = usersMap.getInfoForUser(req.query.userId);
+    if (userInfo && userInfo.oauthAccessToken) {
+      var client = new Evernote.Client({
+        token: userInfo.oauthAccessToken,
+        sandbox: config.SANDBOX
+      });
+      var noteStoreClient = client.getNoteStore();
+      noteStoreClient.getNoteTagNames(userInfo.oauthAccessToken, req.query.guid,
+        function(error, tagNames) {
+          if (error) {
+            errorLogger(res, error);
+            return;
+          } else {
+            // Try to find the target tag in the tags of this note.
+            var upperCaseTagNames = tagNames.map(function(a) { return a.toUpperCase(); });
+            if (upperCaseTagNames.indexOf(config.TARGET_TAG_NAME.toUpperCase()) > -1) {
+              res.send('Note ' + noteTitle + ' has tag!');
+              // TODO: Do some automation here!
+            } else {
+              res.send('Note ' + (noteTitle ? noteTitle : req.query.guid) +
+                ' does not have tag ' + config.TARGET_TAG_NAME);
+            }
+          }
+        }
+      );
+    }
+  } else {
+    res.send('query is not a note update')
+  }
 });
 
 /**
@@ -82,9 +129,18 @@ app.get('/listNotes', function(req, res) {
     var userInfo = usersMap.getInfoForUser(req.query.userId);
     if (userInfo) {
       var noteFilter = new Evernote.NoteFilter({
+        order: Evernote.NoteSortOrder.UPDATE_SEQUENCE_NUMBER,
         inactive: false,
         ascending: false, // newest first
         words: ''
+      });
+
+      var resultSpec = new Evernote.NotesMetadataResultSpec({
+        includeTitle: true,
+        includeTagGuids: true,
+        includeNotebookGuid: true,
+        includeDeleted: true,
+        includeAttributes: true
       });
 
       var client = new Evernote.Client({
@@ -92,11 +148,10 @@ app.get('/listNotes', function(req, res) {
         sandbox: config.SANDBOX
       });
       var noteStoreClient = client.getNoteStore();
-      noteStoreClient.findNotesMetadata(userInfo.oauthAccessToken, noteFilter, 0, 100, resultSpec,
-        function(err, noteList) {
-          if (err) {
-            console.log(err);
-            res.send(JSON.stringify(err));
+      noteStoreClient.findNotesMetadata(userInfo.oauthAccessToken, noteFilter, 0, 100,
+        resultSpec, function(error, noteList) {
+          if (error) {
+            errorLogger(res, error);
             return;
           }
           console.log(noteList.notes);
@@ -113,6 +168,10 @@ app.get('/listNotes', function(req, res) {
               + noteList.notes[0].guid + '&notebookGuid=' + noteList.notes[0].notebookGuid
               + '&reason=update">"update" this note</a>';
 
+            // Add the guid and note name to this session in case the user clicks the link.
+            // TODO: Delete this when we don't need to fake our hooks
+            req.session.noteGuid = noteList.notes[0].guid;
+            req.session.noteTitle = noteList.notes[0].title;
             res.send(response);
           } else {
             res.send('No notes found!');
@@ -140,8 +199,8 @@ app.get('/OAuth', function(req, res) {
   client.getRequestToken(oauthCallbackUrl,
     function(error, oauthRequestToken, oauthRequestTokenSecret, results){
       if (error) {
-        console.log(JSON.stringify(error));
-        res.send(error.data);
+        errorLogger(res, error);
+        return;
       } else {
         // store the tokens in the session
         req.session.oauthRequestToken = oauthRequestToken;
@@ -171,9 +230,8 @@ app.get('/OAuthCallback', function(req, res) {
     req.query['oauth_verifier'],
     function(error, oauthAccessToken, oauthAccessTokenSecret, results) {
       if (error) {
-        console.log('error');
-        console.log(error);
-        res.redirect('/error');
+        errorLogger(res, error, '/error');
+        return;
       } else {
         // store the access token in the session
         usersMap.addUser(results.edam_userId, oauthAccessToken, oauthAccessTokenSecret,
