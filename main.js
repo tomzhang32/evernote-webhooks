@@ -4,6 +4,7 @@
 var express = require('express');
 var Evernote = require('evernote').Evernote;
 var expressSession = require('express-session');
+var Promisifier = require('./Promisifier');
 var UsersMap = require('./UsersMap');
 
 var config;
@@ -195,36 +196,41 @@ app.get('/listNotes', function(req, res) {
         token: userInfo.oauthAccessToken,
         sandbox: config.SANDBOX
       });
-      var noteStoreClient = client.getNoteStore();
-      noteStoreClient.findNotesMetadata(userInfo.oauthAccessToken, noteFilter, 0, 100,
-        resultSpec, function(error, noteList) {
-          if (error) {
-            return errorLogger(res, error);
-          }
-          console.log(noteList.notes);
+      // TODO(2): Store this information in a custom UserInfo object
+      var promisifiedNoteStoreClient =
+        Promisifier.promisifyObject(client.getNoteStore());
 
-          if (noteList.notes.length) {
-            // Make a list of links to fake various webhook actions
-            var fakeWebhookLinkList =
-              noteList.notes.reduce(function(partialList, note, idx) {
-                  var baseNbUrl = '/hook?userId=' + req.query.userId
-                    + '&notebookGuid=' + note.notebookGuid;
-                  var baseUrl = baseNbUrl + '&guid=' + note.guid;
-                  var updateNbLink = '<a href="' + baseNbUrl
-                    + '&reason=notebook_update">notebook_update</a> | ';
-                  var updateLink = '<a href="' + baseUrl + '&reason=update">update</a> | ';
-                  var createLink = '<a href="' + baseUrl + '&reason=create">create</a> | ';
-                  var bizUpdateLink = '<a href="' + baseUrl
-                    + '&reason=business_update">business_update</a> | ';
-                  return partialList + ('<div>' + note.title + ': '
-                    + updateNbLink + updateLink + createLink + bizUpdateLink + '</div>');
-                }, '');
+      var findNotesMetadataPromise =
+        promisifiedNoteStoreClient.findNotesMetadata(
+          userInfo.oauthAccessToken, noteFilter, 0, 100, resultSpec
+        );
+      findNotesMetadataPromise.then(function(noteList) {
+        console.log(noteList.notes);
 
-            res.send(fakeWebhookLinkList);
-          } else {
-            res.send('No notes found!');
-          }
-        });
+        if (noteList.notes.length) {
+          // Make a list of links to fake various webhook actions
+          var fakeWebhookLinkList =
+            noteList.notes.reduce(function(partialList, note, idx) {
+                var baseNbUrl = '/hook?userId=' + req.query.userId
+                  + '&notebookGuid=' + note.notebookGuid;
+                var baseUrl = baseNbUrl + '&guid=' + note.guid;
+                var updateNbLink = '<a href="' + baseNbUrl
+                  + '&reason=notebook_update">notebook_update</a> | ';
+                var updateLink = '<a href="' + baseUrl + '&reason=update">update</a> | ';
+                var createLink = '<a href="' + baseUrl + '&reason=create">create</a> | ';
+                var bizUpdateLink = '<a href="' + baseUrl
+                  + '&reason=business_update">business_update</a> | ';
+                return partialList + ('<div>' + note.title + ': '
+                  + updateNbLink + updateLink + createLink + bizUpdateLink + '</div>');
+              }, '');
+
+          res.send(fakeWebhookLinkList);
+        } else {
+          res.send('No notes found!');
+        }
+      }, function(error) {
+        errorLogger(res, error);
+      });
 
       return;
     }
