@@ -80,8 +80,7 @@ app.get('/hook', function(req, res) {
       noteStoreClient.getNoteTagNames(userInfo.oauthAccessToken, req.query.guid,
         function(error, tagNames) {
           if (error) {
-            errorLogger(res, error);
-            return;
+            return errorLogger(res, error);
           } else {
             // Try to find the target tag in the tags of this note.
             var upperCaseTagNames = tagNames.map(function(a) { return a.toUpperCase(); });
@@ -101,8 +100,7 @@ app.get('/hook', function(req, res) {
               noteStoreClient.findNotesMetadata(userInfo.oauthAccessToken, noteFilter, 0,
                 100, resultSpec, function(error, noteList) {
                   if (error) {
-                    errorLogger(res, error);
-                    return;
+                    return errorLogger(res, error);
                   }
                   // TODO(2): Check noteList.totalNotes to see if we need to call this again or not
                   if (noteList.notes) {
@@ -112,9 +110,26 @@ app.get('/hook', function(req, res) {
                               + '/' + note.guid + '/' + note.guid + '/';
                       return partialList + '<div><a href="' + noteUrl + '">' + note.title + '</a></div>';
                     }, '');
-                    // TODO(2): Look for an existing ToC note
-                    // TODO(1): Create a ToC note with this information
-                    res.send(noteLinkList);
+
+                    // TODO(1): Look for an existing ToC note and update that instead of making a new one
+                    var noteContent = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>';
+                    noteContent += '<!DOCTYPE en-note SYSTEM \"http://xml.evernote.com/pub/enml2.dtd\">';
+                    noteContent += '<en-note>' + noteLinkList + '</en-note>';
+                    // Create note object
+                    var ourNote = new Evernote.Note();
+                    ourNote.title = 'Table of Contents';
+                    ourNote.content = noteContent;
+                    ourNote.notebookGuid = req.query.notebookGuid;
+                    noteStoreClient.createNote(ourNote, function(error, note) {
+                        if (error) {
+                          // Something was wrong with the note data
+                          // See EDAMErrorCode enumeration for error code explanation
+                          // http://dev.evernote.com/documentation/reference/Errors.html#Enum_EDAMErrorCode
+                          return errorLogger(res, error);
+                        } else {
+                          res.send(noteLinkList);
+                        }
+                      });
                   } else {
                     // This should never happen
                     console.log('No notes found!');
@@ -122,6 +137,8 @@ app.get('/hook', function(req, res) {
                   }
                 });
             } else {
+              console.log('Note ' + req.query.guid +
+                ' does not have tag ' + config.TARGET_TAG_NAME);
               res.send('Note ' + req.query.guid +
                 ' does not have tag ' + config.TARGET_TAG_NAME);
             }
@@ -130,6 +147,8 @@ app.get('/hook', function(req, res) {
       );
     }
   } else {
+    console.log('query is not a note update:');
+    console.log(req.query);
     res.send('query is not a note update')
   }
 });
@@ -178,8 +197,7 @@ app.get('/listNotes', function(req, res) {
       noteStoreClient.findNotesMetadata(userInfo.oauthAccessToken, noteFilter, 0, 100,
         resultSpec, function(error, noteList) {
           if (error) {
-            errorLogger(res, error);
-            return;
+            return errorLogger(res, error);
           }
           console.log(noteList.notes);
 
@@ -227,8 +245,7 @@ app.get('/OAuth', function(req, res) {
   client.getRequestToken(oauthCallbackUrl,
     function(error, oauthRequestToken, oauthRequestTokenSecret, results){
       if (error) {
-        errorLogger(res, error);
-        return;
+        return errorLogger(res, error);
       } else {
         // store the tokens in the session
         req.session.oauthRequestToken = oauthRequestToken;
@@ -258,8 +275,7 @@ app.get('/OAuthCallback', function(req, res) {
     req.query['oauth_verifier'],
     function(error, oauthAccessToken, oauthAccessTokenSecret, results) {
       if (error) {
-        errorLogger(res, error, '/error');
-        return;
+        return errorLogger(res, error, '/error');
       } else {
         // store the access token in the session
         usersMap.addUser(results.edam_userId, oauthAccessToken, oauthAccessTokenSecret,
