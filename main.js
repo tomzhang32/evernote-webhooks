@@ -56,19 +56,19 @@ app.get('/error', function(req, res) {
 
 /**
  * The hook to receive Evernote events:
- * https://dev.evernote.com/doc/articles/polling_notification.php
+ * https://dev.evernote.com/doc/articles/polling_notification.php#webhooks
  * Logs the query to the history array
  * For our purposes, we only care about responding to note update events.
  */
 app.get('/hook', function(req, res) {
   console.log('/hook');
   history.push(req.query);
-  if (req.query && req.query.userId && req.query.guid
+  if (req.query && req.query.userId && req.query.guid && req.query.notebookGuid
     && (req.query.reason === 'update' || req.query.reason === 'business_update')) {
-    // TODO: Do we really need to check the reason? Is just having the guid enough?
+    // TODO(3): Do we really need to check the reason? Is just having the guid enough?
     //   (ie, in case a client adds a note with a tag)
     // Retrieve the note name stored in session if we have saved it
-    // TODO: Delete this when we don't need to fake our hooks
+    // TODO(2): Delete this when we don't need to fake our hooks
     var noteTitle = '';
     if (req.query.guid === req.session.noteGuid) {
       noteTitle = req.session.noteTitle;
@@ -77,6 +77,7 @@ app.get('/hook', function(req, res) {
     // Look up this userID and get note info for this note
     var userInfo = usersMap.getInfoForUser(req.query.userId);
     if (userInfo && userInfo.oauthAccessToken) {
+      // TODO(3): Save this client on the userInfo object
       var client = new Evernote.Client({
         token: userInfo.oauthAccessToken,
         sandbox: config.SANDBOX
@@ -91,8 +92,41 @@ app.get('/hook', function(req, res) {
             // Try to find the target tag in the tags of this note.
             var upperCaseTagNames = tagNames.map(function(a) { return a.toUpperCase(); });
             if (upperCaseTagNames.indexOf(config.TARGET_TAG_NAME.toUpperCase()) > -1) {
-              res.send('Note ' + noteTitle + ' has tag!');
-              // TODO: Do some automation here!
+              var noteFilter = new Evernote.NoteFilter({
+                order: Evernote.NoteSortOrder.UPDATE, // sort by last updated time
+                inactive: false,
+                ascending: true, // oldest first
+                notebookGuid: req.query.notebookGuid,
+                words: 'tag:' + config.TARGET_TAG_NAME
+              });
+
+              var resultSpec = new Evernote.NotesMetadataResultSpec({
+                includeTitle: true
+              });
+
+              noteStoreClient.findNotesMetadata(userInfo.oauthAccessToken, noteFilter, 0,
+                100, resultSpec, function(error, noteList) {
+                  if (error) {
+                    errorLogger(res, error);
+                    return;
+                  }
+                  // TODO(2): Check noteList.totalNotes to see if we need to call this again or not
+                  if (noteList.notes) {
+                    console.log(noteList.notes);
+                    var noteLinkList = noteList.notes.reduce(function(partialList, note) {
+                      var noteUrl = 'evernote:///view/' + userInfo.userId + '/' + userInfo.shard
+                              + '/' + note.guid + '/' + note.guid + '/';
+                      return partialList + '<div><a href="' + noteUrl + '">' + note.title + '</a></div>';
+                    }, '');
+                    // TODO(2): Look for an existing ToC note
+                    // TODO(1): Create a ToC note with this information
+                    res.send(noteLinkList);
+                  } else {
+                    // This should never happen
+                    console.log('No notes found!');
+                    res.send('No notes with tag found!');
+                  }
+                });
             } else {
               res.send('Note ' + (noteTitle ? noteTitle : req.query.guid) +
                 ' does not have tag ' + config.TARGET_TAG_NAME);
@@ -121,7 +155,8 @@ app.get('/history', function(req, res) {
 });
 
 /**
- * Logs some notes in case we want to inspect the details
+ * Logs some notes in case we want to inspect the details. Mainly for testing.
+ * Provides a link that will fake an update webhook event for a given note.
  */
 app.get('/listNotes', function(req, res) {
   console.log('/listNotes');
@@ -138,9 +173,7 @@ app.get('/listNotes', function(req, res) {
       var resultSpec = new Evernote.NotesMetadataResultSpec({
         includeTitle: true,
         includeTagGuids: true,
-        includeNotebookGuid: true,
-        includeDeleted: true,
-        includeAttributes: true
+        includeNotebookGuid: true
       });
 
       var client = new Evernote.Client({
@@ -169,7 +202,7 @@ app.get('/listNotes', function(req, res) {
               + '&reason=update">"update" this note</a>';
 
             // Add the guid and note name to this session in case the user clicks the link.
-            // TODO: Delete this when we don't need to fake our hooks
+            // TODO(2): Delete this when we don't need to fake our hooks
             req.session.noteGuid = noteList.notes[0].guid;
             req.session.noteTitle = noteList.notes[0].title;
             res.send(response);
