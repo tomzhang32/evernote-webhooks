@@ -67,12 +67,6 @@ app.get('/hook', function(req, res) {
     && (req.query.reason === 'update' || req.query.reason === 'business_update')) {
     // TODO(3): Do we really need to check the reason? Is just having the guid enough?
     //   (ie, in case a client adds a note with a tag)
-    // Retrieve the note name stored in session if we have saved it
-    // TODO(2): Delete this when we don't need to fake our hooks
-    var noteTitle = '';
-    if (req.query.guid === req.session.noteGuid) {
-      noteTitle = req.session.noteTitle;
-    }
 
     // Look up this userID and get note info for this note
     var userInfo = usersMap.getInfoForUser(req.query.userId);
@@ -128,7 +122,7 @@ app.get('/hook', function(req, res) {
                   }
                 });
             } else {
-              res.send('Note ' + (noteTitle ? noteTitle : req.query.guid) +
+              res.send('Note ' + req.query.guid +
                 ' does not have tag ' + config.TARGET_TAG_NAME);
             }
           }
@@ -190,22 +184,23 @@ app.get('/listNotes', function(req, res) {
           console.log(noteList.notes);
 
           if (noteList.notes.length) {
-            response = '';
-            response += noteList.notes.length + ' notes found<br>';
-            response += 'first note:<br>';
-            response += 'guid: ' + noteList.notes[0].guid + '<br>';
-            response += 'title: ' + noteList.notes[0].title + '<br>';
-            response += 'notebookGuid: ' + noteList.notes[0].notebookGuid + '<br>';
-            response += 'tagGuids: ' + noteList.notes[0].tagGuids + '<br>';
-            response += '<a href="/hook?userId=' + req.query.userId + '&guid='
-              + noteList.notes[0].guid + '&notebookGuid=' + noteList.notes[0].notebookGuid
-              + '&reason=update">"update" this note</a>';
+            // Make a list of links to fake various webhook actions
+            var fakeWebhookLinkList =
+              noteList.notes.reduce(function(partialList, note, idx) {
+                  var baseNbUrl = '/hook?userId=' + req.query.userId
+                    + '&notebookGuid=' + note.notebookGuid;
+                  var baseUrl = baseNbUrl + '&guid=' + note.guid;
+                  var updateNbLink = '<a href="' + baseNbUrl
+                    + '&reason=notebook_update">notebook_update</a> | ';
+                  var updateLink = '<a href="' + baseUrl + '&reason=update">update</a> | ';
+                  var createLink = '<a href="' + baseUrl + '&reason=create">create</a> | ';
+                  var bizUpdateLink = '<a href="' + baseUrl
+                    + '&reason=business_update">business_update</a> | ';
+                  return partialList + ('<div>' + note.title + ': '
+                    + updateNbLink + updateLink + createLink + bizUpdateLink + '</div>');
+                }, '');
 
-            // Add the guid and note name to this session in case the user clicks the link.
-            // TODO(2): Delete this when we don't need to fake our hooks
-            req.session.noteGuid = noteList.notes[0].guid;
-            req.session.noteTitle = noteList.notes[0].title;
-            res.send(response);
+            res.send(fakeWebhookLinkList);
           } else {
             res.send('No notes found!');
           }
