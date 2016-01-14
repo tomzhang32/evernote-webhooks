@@ -43,12 +43,15 @@ var errorLogger = function(res, error, targetUrl) {
   }
 }
 
-var createNote = function(noteStoreClient, title, content, notebookGuid) {
+/**
+ * Utility function to create a new Note on the server with the given attributes
+ */
+var createNote = function(noteStoreClient, authToken, title, content, notebookGuid) {
   var newNote = new Evernote.Note();
   newNote.title = title;
   newNote.content = content;
   newNote.notebookGuid = notebookGuid;
-  return noteStoreClient.createNote(newNote);
+  return noteStoreClient.createNote(authToken, newNote);
 }
 
 var app = express();
@@ -150,28 +153,34 @@ app.get('/hook', function(req, res) {
               );
 
             return promisedTocNote.then(function(tocNote) {
-              console.log('Found existing table of contents with title ' + tocNote.title
-                          + '; updating');
-              tocNote.content = noteContent;
-              return promisifiedNoteStoreClient.updateNote(tocNote);
+              if (tocNote.deleted) {
+                console.log('Existing table of contents was deleted; creating new note');
+                return createNote(promisifiedNoteStoreClient, userInfo.oauthAccessToken,
+                                  config.TOC_TITLE, noteContent, req.query.notebookGuid);
+              } else {
+                console.log('Found existing table of contents with title ' + tocNote.title
+                            + '; updating');
+                tocNote.content = noteContent;
+                return promisifiedNoteStoreClient.updateNote(tocNote);
+              }
             }, function(error) {
               /* If this error is EDAMNotFound, check if it's due to a bad note guid. If
                * so, create a new note. See
                * https://dev.evernote.com/doc/reference/Errors.html#Struct_EDAMNotFoundException
                */
               if (error.identifier === 'Note.guid') {
-                console.log('Saved table of contents note was not found; creating new note');
-                return createNote(promisifiedNoteStoreClient, config.TOC_TITLE,
-                                  noteContent, req.query.notebookGuid);
+                console.log('Saved table of contents was not found; creating new note');
+                return createNote(promisifiedNoteStoreClient, userInfo.oauthAccessToken,
+                                  config.TOC_TITLE, noteContent, req.query.notebookGuid);
               } else {
                 return new Promise((resolve, reject) => { reject(error) });
               }
             });
           } else {
             // Create new table of contents note
-            console.log('No entry for this notebook; creating new note')
-            return createNote(promisifiedNoteStoreClient, config.TOC_TITLE,
-                              noteContent, req.query.notebookGuid);
+            console.log('No table of contents for this notebook; creating new note');
+            return createNote(promisifiedNoteStoreClient, userInfo.oauthAccessToken,
+                              config.TOC_TITLE, noteContent, req.query.notebookGuid);
           }
         } else {
           // This should never happen, because we got here by updating a note with the tag
@@ -245,11 +254,9 @@ app.get('/listNotes', function(req, res) {
       var promisifiedNoteStoreClient =
         Promisifier.promisifyObject(client.getNoteStore());
 
-      var findNotesMetadataPromise =
-        promisifiedNoteStoreClient.findNotesMetadata(
-          userInfo.oauthAccessToken, noteFilter, 0, 100, resultSpec
-        );
-      findNotesMetadataPromise.then(function(noteList) {
+      promisifiedNoteStoreClient.findNotesMetadata(
+        userInfo.oauthAccessToken, noteFilter, 0, 100, resultSpec
+      ).then(function(noteList) {
         console.log(noteList.notes);
 
         if (noteList.notes.length) {
