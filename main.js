@@ -15,9 +15,11 @@ try {
 
 config.API_CONSUMER_KEY = config.API_CONSUMER_KEY || process.env.consumerKey;
 config.API_CONSUMER_SECRET = config.API_CONSUMER_SECRET || process.env.consumerSecret;
-config.SANDBOX = config.SANDBOX || true;
-config.SERVICE_BASE = config.SERVICE_BASE || process.env.serviceBase;
-config.TARGET_TAG_NAME = 'toc';
+config.SANDBOX = config.SANDBOX || process.env.sandbox || true;
+// TODO(3): Is there a better name for this config?
+config.SERVICE_BASE = config.SERVICE_BASE || process.env.serviceBase
+                      || 'http://localhost:3000';
+config.TARGET_TAG_NAME = config.TARGET_TAG_NAME || process.env.tagName || 'toc';
 
 var oauthCallbackUrl = config.SERVICE_BASE + '/OAuthCallback';
 
@@ -66,12 +68,12 @@ app.get('/hook', function(req, res) {
   if (req.query && req.query.userId && req.query.guid && req.query.notebookGuid
     && (req.query.reason === 'update' || req.query.reason === 'business_update')) {
     // TODO(3): Do we really need to check the reason? Is just having the guid enough?
-    //   (ie, in case a client adds a note with a tag)
+    // Are we incorrectly excluding 'create' events?
 
     // Look up this userID and get note info for this note
     var userInfo = usersMap.getInfoForUser(req.query.userId);
     if (userInfo && userInfo.oauthAccessToken) {
-      // TODO(3): Save this client on the userInfo object
+      // TODO(3): Save this client on a userInfo object
       var client = new Evernote.Client({
         token: userInfo.oauthAccessToken,
         sandbox: config.SANDBOX
