@@ -71,83 +71,86 @@ app.get('/hook', function(req, res) {
     // TODO(3): Do we really need to check the reason? Is just having the guid enough?
     // Are we incorrectly excluding 'create' events?
 
-    // Look up this userID and get note info for this note
+    // Look up this userId and get note info for this note
     var userInfo = usersMap.getInfoForUser(req.query.userId);
     if (userInfo && userInfo.oauthAccessToken) {
-      // TODO(3): Save this client on a userInfo object
+      // TODO(2): Store this information in a custom UserInfo object
       var client = new Evernote.Client({
         token: userInfo.oauthAccessToken,
         sandbox: config.SANDBOX
       });
-      var noteStoreClient = client.getNoteStore();
-      noteStoreClient.getNoteTagNames(userInfo.oauthAccessToken, req.query.guid,
-        function(error, tagNames) {
-          if (error) {
-            return errorLogger(res, error);
-          } else {
-            // Try to find the target tag in the tags of this note.
-            var upperCaseTagNames = tagNames.map(function(a) { return a.toUpperCase(); });
-            if (upperCaseTagNames.indexOf(config.TARGET_TAG_NAME.toUpperCase()) > -1) {
-              var noteFilter = new Evernote.NoteFilter({
-                order: Evernote.NoteSortOrder.UPDATE, // sort by last updated time
-                inactive: false,
-                ascending: true, // oldest first
-                notebookGuid: req.query.notebookGuid,
-                words: 'tag:' + config.TARGET_TAG_NAME
-              });
+      var promisifiedNoteStoreClient =
+        Promisifier.promisifyObject(client.getNoteStore());
 
-              var resultSpec = new Evernote.NotesMetadataResultSpec({
-                includeTitle: true
-              });
+      var tagNamesPromise =
+        promisifiedNoteStoreClient.getNoteTagNames(
+          userInfo.oauthAccessToken, req.query.guid
+        );
 
-              noteStoreClient.findNotesMetadata(userInfo.oauthAccessToken, noteFilter, 0,
-                100, resultSpec, function(error, noteList) {
-                  if (error) {
-                    return errorLogger(res, error);
-                  }
-                  // TODO(2): Check noteList.totalNotes to see if we need to call this again or not
-                  if (noteList.notes) {
-                    console.log(noteList.notes);
-                    var noteLinkList = noteList.notes.reduce(function(partialList, note) {
-                      var noteUrl = 'evernote:///view/' + userInfo.userId + '/' + userInfo.shard
-                              + '/' + note.guid + '/' + note.guid + '/';
-                      return partialList + '<div><a href="' + noteUrl + '">' + note.title + '</a></div>';
-                    }, '');
+      // TODO(2): Save the notes with this tag and trigger the update of the ToC if a tag is deleted
+      tagNamesPromise.then(function(tagNames) {
+        // Try to find the target tag in the tags of this note.
+        var upperCaseTagNames = tagNames.map(function(a) { return a.toUpperCase(); });
+        if (upperCaseTagNames.indexOf(config.TARGET_TAG_NAME.toUpperCase()) > -1) {
+          var noteFilter = new Evernote.NoteFilter({
+            order: Evernote.NoteSortOrder.UPDATE, // sort by last updated time
+            inactive: false,
+            ascending: true, // oldest first
+            notebookGuid: req.query.notebookGuid,
+            words: 'tag:' + config.TARGET_TAG_NAME
+          });
+          var resultSpec = new Evernote.NotesMetadataResultSpec({
+            includeTitle: true
+          });
 
-                    // TODO(1): Look for an existing ToC note and update that instead of making a new one
-                    var noteContent = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>';
-                    noteContent += '<!DOCTYPE en-note SYSTEM \"http://xml.evernote.com/pub/enml2.dtd\">';
-                    noteContent += '<en-note>' + noteLinkList + '</en-note>';
-                    // Create note object
-                    var ourNote = new Evernote.Note();
-                    ourNote.title = 'Table of Contents';
-                    ourNote.content = noteContent;
-                    ourNote.notebookGuid = req.query.notebookGuid;
-                    noteStoreClient.createNote(ourNote, function(error, note) {
-                        if (error) {
-                          // Something was wrong with the note data
-                          // See EDAMErrorCode enumeration for error code explanation
-                          // http://dev.evernote.com/documentation/reference/Errors.html#Enum_EDAMErrorCode
-                          return errorLogger(res, error);
-                        } else {
-                          res.send(noteLinkList);
-                        }
-                      });
-                  } else {
-                    // This should never happen
-                    console.log('No notes found!');
-                    res.send('No notes with tag found!');
-                  }
-                });
-            } else {
-              console.log('Note ' + req.query.guid +
-                ' does not have tag ' + config.TARGET_TAG_NAME);
-              res.send('Note ' + req.query.guid +
-                ' does not have tag ' + config.TARGET_TAG_NAME);
-            }
-          }
+          return promisifiedNoteStoreClient.findNotesMetadata(
+            userInfo.oauthAccessToken, noteFilter, 0, 100, resultSpec
+          );
+        } else {
+          return new Promise(function(resolve, reject) {
+            reject('Note ' + req.query.guid + ' does not have tag '
+                    + config.TARGET_TAG_NAME);
+          });
         }
-      );
+      }).then(function(noteList) {
+        // TODO(2): Check noteList.totalNotes to see if we need to call this again or not
+        if (noteList.notes) {
+          console.log(noteList.notes);
+          var noteLinkList = noteList.notes.reduce(function(partialList, note) {
+            var noteUrl = 'evernote:///view/' + userInfo.userId + '/' + userInfo.shard
+                    + '/' + note.guid + '/' + note.guid + '/';
+            return partialList + '<div><a href="' + noteUrl + '">' + note.title + '</a></div>';
+          }, '');
+
+          // TODO(1): Look for an existing ToC note and update that instead of making a new one
+          var noteContent = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>';
+          noteContent += '<!DOCTYPE en-note SYSTEM \"http://xml.evernote.com/pub/enml2.dtd\">';
+          noteContent += '<en-note>' + noteLinkList + '</en-note>';
+
+          // Create note object
+          var ourNote = new Evernote.Note();
+          ourNote.title = 'Table of Contents';
+          ourNote.content = noteContent;
+          ourNote.notebookGuid = req.query.notebookGuid;
+          return promisifiedNoteStoreClient.createNote(ourNote);
+        } else {
+          // This should never happen, because we got here by updating a note with the tag
+          return new Promise(function(resolve, reject) {
+            reject('No notes with tag found!');
+          });
+        }
+      }).then(function(note) {
+        // TODO(1): Save the guid of this note
+        console.log(note);
+        res.send('Successfully made ' + note.title + ' note ' + note.guid + ' in notebook ' + note.notebookGuid);
+      }).catch(function(error) {
+        // Something was wrong with one of our service calls
+        // See EDAMErrorCode enumeration for error code explanation
+        // http://dev.evernote.com/documentation/reference/Errors.html#Enum_EDAMErrorCode
+        errorLogger(res, error);
+      });
+    } else {
+      errorLogger(res, 'No saved information for user ' + req.query.userId);
     }
   } else {
     console.log('query is not a note update:');
