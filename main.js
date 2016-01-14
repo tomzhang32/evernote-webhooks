@@ -20,12 +20,16 @@ config.SANDBOX = config.SANDBOX || process.env.sandbox || true;
 // TODO(3): Is there a better name for this config?
 config.SERVICE_BASE = config.SERVICE_BASE || process.env.serviceBase
                       || 'http://localhost:3000';
+// The tag to look for
 config.TARGET_TAG_NAME = config.TARGET_TAG_NAME || process.env.tagName || 'toc';
+// The title to assign to newly created tables of contents
+config.TOC_TITLE = config.TOC_TITLE || process.env.tocTitle || 'Table of Contents';
 
 var oauthCallbackUrl = config.SERVICE_BASE + '/OAuthCallback';
 
 var usersMap = new UsersMap();
 var history = [];
+var tocNotesByNotebook = {};
 
 /**
  * Function to log an error and send it to res, or redirect to some target url
@@ -37,6 +41,14 @@ var errorLogger = function(res, error, targetUrl) {
   } else {
     res.send(error);
   }
+}
+
+var createNote = function(noteStoreClient, title, content, notebookGuid) {
+  var newNote = new Evernote.Note();
+  newNote.title = title;
+  newNote.content = content;
+  newNote.notebookGuid = notebookGuid;
+  return noteStoreClient.createNote(newNote);
 }
 
 var app = express();
@@ -115,24 +127,52 @@ app.get('/hook', function(req, res) {
       }).then(function(noteList) {
         // TODO(2): Check noteList.totalNotes to see if we need to call this again or not
         if (noteList.notes) {
-          console.log(noteList.notes);
+          console.log('Found ' + noteList.notes.length + ' notes with tag');
           var noteLinkList = noteList.notes.reduce(function(partialList, note) {
             var noteUrl = 'evernote:///view/' + userInfo.userId + '/' + userInfo.shard
                     + '/' + note.guid + '/' + note.guid + '/';
             return partialList + '<div><a href="' + noteUrl + '">' + note.title + '</a></div>';
           }, '');
 
-          // TODO(1): Look for an existing ToC note and update that instead of making a new one
           var noteContent = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>';
           noteContent += '<!DOCTYPE en-note SYSTEM \"http://xml.evernote.com/pub/enml2.dtd\">';
           noteContent += '<en-note>' + noteLinkList + '</en-note>';
 
-          // Create note object
-          var ourNote = new Evernote.Note();
-          ourNote.title = 'Table of Contents';
-          ourNote.content = noteContent;
-          ourNote.notebookGuid = req.query.notebookGuid;
-          return promisifiedNoteStoreClient.createNote(ourNote);
+          var tocNote;
+          // TODO(3): Append to the existing note instead of overwriting it?
+          // TODO(3): Look up by tag as a fallback
+          // If there's an existing Table of Contents note that we created, use that instead
+          if (tocNotesByNotebook[req.query.notebookGuid]) {
+            var noteGuid = tocNotesByNotebook[req.query.notebookGuid];
+            var promisedTocNote =
+              promisifiedNoteStoreClient.getNote(
+                userInfo.oauthAccessToken, noteGuid, true, false, false, false
+              );
+
+            return promisedTocNote.then(function(tocNote) {
+              console.log('Found existing table of contents with title ' + tocNote.title
+                          + '; updating');
+              tocNote.content = noteContent;
+              return promisifiedNoteStoreClient.updateNote(tocNote);
+            }, function(error) {
+              /* If this error is EDAMNotFound, check if it's due to a bad note guid. If
+               * so, create a new note. See
+               * https://dev.evernote.com/doc/reference/Errors.html#Struct_EDAMNotFoundException
+               */
+              if (error.identifier === 'Note.guid') {
+                console.log('Saved table of contents note was not found; creating new note');
+                return createNote(promisifiedNoteStoreClient, config.TOC_TITLE,
+                                  noteContent, req.query.notebookGuid);
+              } else {
+                return new Promise((resolve, reject) => { reject(error) });
+              }
+            });
+          } else {
+            // Create new table of contents note
+            console.log('No entry for this notebook; creating new note')
+            return createNote(promisifiedNoteStoreClient, config.TOC_TITLE,
+                              noteContent, req.query.notebookGuid);
+          }
         } else {
           // This should never happen, because we got here by updating a note with the tag
           return new Promise(function(resolve, reject) {
@@ -140,8 +180,10 @@ app.get('/hook', function(req, res) {
           });
         }
       }).then(function(note) {
-        // TODO(1): Save the guid of this note
-        console.log(note);
+        // If we haven't created a ToC note for this notebook yet, do so.
+        if (!tocNotesByNotebook[note.notebookGuid]) {
+          tocNotesByNotebook[note.notebookGuid] = note.guid;
+        }
         res.send('Successfully made ' + note.title + ' note ' + note.guid + ' in notebook ' + note.notebookGuid);
       }).catch(function(error) {
         // Something was wrong with one of our service calls
