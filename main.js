@@ -148,7 +148,11 @@ app.get('/hook', function(req, res) {
       tagNamesPromise.then(function(tagNames) {
         // Try to find the target tag in the tags of this note.
         var upperCaseTagNames = tagNames.map(function(a) { return a.toUpperCase(); });
-        if (upperCaseTagNames.indexOf(config.TARGET_TAG_NAME.toUpperCase()) > -1) {
+        if (upperCaseTagNames.indexOf(config.TARGET_TAG_NAME.toUpperCase()) > -1
+              // Or if we had previously saved this note as one with a tag, but the tag's been removed
+              || tocNotesByNotebook[req.query.notebookGuid]
+              && tocNotesByNotebook[req.query.notebookGuid].noteGuidList
+              && tocNotesByNotebook[req.query.notebookGuid].noteGuidList.indexOf(req.query.guid) > -1) {
           var noteFilter = new Evernote.NoteFilter({
             order: Evernote.NoteSortOrder.UPDATE, // sort by last updated time
             inactive: false,
@@ -177,6 +181,14 @@ app.get('/hook', function(req, res) {
             return partialList + '<div><a href="' + noteUrl + '">' + note.title + '</a></div>';
           }, '');
 
+          if (!tocNotesByNotebook[req.query.notebookGuid]) {
+            tocNotesByNotebook[req.query.notebookGuid] = {};
+          }
+          var noteGuidList = notes.map(function(note) {
+            return note.guid;
+          });
+          tocNotesByNotebook[req.query.notebookGuid].noteGuidList = noteGuidList;
+
           var noteContent = '<?xml version=\"1.0\" encoding=\"UTF-8\"?>';
           noteContent += '<!DOCTYPE en-note SYSTEM \"http://xml.evernote.com/pub/enml2.dtd\">';
           noteContent += '<en-note>' + noteLinkList + '</en-note>';
@@ -185,8 +197,8 @@ app.get('/hook', function(req, res) {
           // TODO(3): Append to the existing note instead of overwriting it?
           // TODO(3): Look up by tag as a fallback
           // If there's an existing Table of Contents note that we created, use that instead
-          if (tocNotesByNotebook[req.query.notebookGuid]) {
-            var noteGuid = tocNotesByNotebook[req.query.notebookGuid];
+          if (tocNotesByNotebook[req.query.notebookGuid] && tocNotesByNotebook[req.query.notebookGuid].noteGuid) {
+            var noteGuid = tocNotesByNotebook[req.query.notebookGuid].noteGuid;
             var promisedTocNote =
               promisifiedNoteStoreClient.getNote(
                 userInfo.oauthAccessToken, noteGuid, true, false, false, false
@@ -233,7 +245,10 @@ app.get('/hook', function(req, res) {
         }
       }).then(function(note) {
         // Save the new note for future reference, possibly overwriting the old value
-        tocNotesByNotebook[note.notebookGuid] = note.guid;
+        if (!tocNotesByNotebook[note.notebookGuid]) {
+          tocNotesByNotebook[note.notebookGuid] = {};
+        }
+        tocNotesByNotebook[note.notebookGuid].noteGuid = note.guid;
         res.send('Successfully made ' + note.title + ' note ' + note.guid + ' in notebook ' + note.notebookGuid);
       }).catch(function(error) {
         // Something was wrong with one of our service calls
