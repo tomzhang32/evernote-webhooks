@@ -45,6 +45,13 @@ var errorLogger = function(res, error, targetUrl) {
 
 /**
  * Utility function to create a new Note on the server with the given attributes
+ *
+ * @param noteStoreClient the NoteStore client to use when making the createNote request
+ * @param authToken the user's authentication token
+ * @param title the title to give the new note
+ * @param content the content to store in the new note
+ * @param notebookGuid the guid of this note's parent notebook
+ * @return Promise the result of the createNote call.
  */
 var createNote = function(noteStoreClient, authToken, title, content, notebookGuid) {
   var newNote = new Evernote.Note();
@@ -52,6 +59,41 @@ var createNote = function(noteStoreClient, authToken, title, content, notebookGu
   newNote.content = content;
   newNote.notebookGuid = notebookGuid;
   return noteStoreClient.createNote(authToken, newNote);
+}
+
+/**
+ * Utility function to find all note metadata for a given filter
+ *
+ * @param noteStoreClient the NoteStore client to use when making the createNote request
+ * @param authToken the user's authentication token
+ * @param noteFilter the NoteStore.NoteFilter object with which to filter the results
+ * @param resultSpec the NoteStore.NotesMetadataResultSpec that specifies which fields to
+ *                    return
+ * @param foundNotes the notes that have been found so far.
+ * @return Promise resolving to an array of NotesMetadata of every note matching filter
+ */
+var findAllNotesMetadata =
+  function(noteStoreClient, accessToken, noteFilter, resultSpec, foundNotes) {
+  var offset = foundNotes.length;
+  // The maximum number of notes to fetch at a time
+  var maxNotes = 100;
+  return noteStoreClient.findNotesMetadata(
+      accessToken, noteFilter, offset, maxNotes, resultSpec
+    ).then(function(noteList) {
+      if (noteList.notes.length > 0) {
+        var newFoundNotes = foundNotes.concat(noteList.notes);
+        if (noteList.totalNotes > newFoundNotes.length) {
+          // There are more notes to fetch, recurse
+          return findAllNotesMetadata(
+                  noteStoreClient, accessToken, noteFilter, resultSpec, newFoundNotes
+                );
+        } else {
+          return newFoundNotes;
+        }
+      } else {
+        return foundNotes;
+      }
+    });
 }
 
 var app = express();
@@ -118,20 +160,18 @@ app.get('/hook', function(req, res) {
             includeTitle: true
           });
 
-          return promisifiedNoteStoreClient.findNotesMetadata(
-            userInfo.oauthAccessToken, noteFilter, 0, 100, resultSpec
-          );
+          return findAllNotesMetadata(promisifiedNoteStoreClient,
+                  userInfo.oauthAccessToken, noteFilter, resultSpec, []);
         } else {
           return new Promise(function(resolve, reject) {
             reject('Note ' + req.query.guid + ' does not have tag '
                     + config.TARGET_TAG_NAME);
           });
         }
-      }).then(function(noteList) {
-        // TODO(2): Check noteList.totalNotes to see if we need to call this again or not
-        if (noteList.notes) {
-          console.log('Found ' + noteList.notes.length + ' notes with tag');
-          var noteLinkList = noteList.notes.reduce(function(partialList, note) {
+      }).then(function(notes) {
+        if (notes.length > 0) {
+          console.log('Found ' + notes.length + ' notes with tag');
+          var noteLinkList = notes.reduce(function(partialList, note) {
             var noteUrl = 'evernote:///view/' + userInfo.userId + '/' + userInfo.shard
                     + '/' + note.guid + '/' + note.guid + '/';
             return partialList + '<div><a href="' + noteUrl + '">' + note.title + '</a></div>';
@@ -176,13 +216,13 @@ app.get('/hook', function(req, res) {
                 return new Promise((resolve, reject) => { reject(error) });
               }
             });
-          } else {
+          } else { // no note found in tocNotesByNotebook for this notebook
             // Create new table of contents note
             console.log('No table of contents for this notebook; creating new note');
             return createNote(promisifiedNoteStoreClient, userInfo.oauthAccessToken,
                               config.TOC_TITLE, noteContent, req.query.notebookGuid);
           }
-        } else {
+        } else { // notes.length > 0 is false
           // This should never happen, because we got here by updating a note with the tag
           return new Promise(function(resolve, reject) {
             reject('No notes with tag found!');
@@ -254,15 +294,15 @@ app.get('/listNotes', function(req, res) {
       var promisifiedNoteStoreClient =
         Promisifier.promisifyObject(client.getNoteStore());
 
-      promisifiedNoteStoreClient.findNotesMetadata(
-        userInfo.oauthAccessToken, noteFilter, 0, 100, resultSpec
-      ).then(function(noteList) {
-        console.log(noteList.notes);
+      findAllNotesMetadata(
+        promisifiedNoteStoreClient, userInfo.oauthAccessToken, noteFilter, resultSpec, []
+      ).then(function(notes) {
+        console.log(notes);
 
-        if (noteList.notes.length) {
+        if (notes.length > 0) {
           // Make a list of links to fake various webhook actions
           var fakeWebhookLinkList =
-            noteList.notes.reduce(function(partialList, note, idx) {
+            notes.reduce(function(partialList, note, idx) {
                 var baseNbUrl = '/hook?userId=' + req.query.userId
                   + '&notebookGuid=' + note.notebookGuid;
                 var baseUrl = baseNbUrl + '&guid=' + note.guid;
