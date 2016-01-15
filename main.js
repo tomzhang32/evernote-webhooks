@@ -195,6 +195,7 @@ app.get('/hook', function(req, res) {
             return promisedTocNote.then(function(tocNote) {
               if (tocNote.deleted) {
                 console.log('Existing table of contents was deleted; creating new note');
+                // TODO(3) add the notebook name to the title of this note
                 return createNote(promisifiedNoteStoreClient, userInfo.oauthAccessToken,
                                   config.TOC_TITLE, noteContent, req.query.notebookGuid);
               } else {
@@ -210,6 +211,7 @@ app.get('/hook', function(req, res) {
                */
               if (error.identifier === 'Note.guid') {
                 console.log('Saved table of contents was not found; creating new note');
+                // TODO(3) add the notebook name to the title of this note
                 return createNote(promisifiedNoteStoreClient, userInfo.oauthAccessToken,
                                   config.TOC_TITLE, noteContent, req.query.notebookGuid);
               } else {
@@ -218,6 +220,7 @@ app.get('/hook', function(req, res) {
             });
           } else { // no note found in tocNotesByNotebook for this notebook
             // Create new table of contents note
+            // TODO(3) add the notebook name to the title of this note
             console.log('No table of contents for this notebook; creating new note');
             return createNote(promisifiedNoteStoreClient, userInfo.oauthAccessToken,
                               config.TOC_TITLE, noteContent, req.query.notebookGuid);
@@ -229,10 +232,8 @@ app.get('/hook', function(req, res) {
           });
         }
       }).then(function(note) {
-        // If we haven't created a ToC note for this notebook yet, do so.
-        if (!tocNotesByNotebook[note.notebookGuid]) {
-          tocNotesByNotebook[note.notebookGuid] = note.guid;
-        }
+        // Save the new note for future reference, possibly overwriting the old value
+        tocNotesByNotebook[note.notebookGuid] = note.guid;
         res.send('Successfully made ' + note.title + ' note ' + note.guid + ' in notebook ' + note.notebookGuid);
       }).catch(function(error) {
         // Something was wrong with one of our service calls
