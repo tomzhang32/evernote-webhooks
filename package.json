@@ -10,7 +10,7 @@
     "request": "^2.67.0"
   },
   "engines": {
-    "node": "5.4.0"
+    "node": "6.11.1"
   },
   "scripts": {
     "start": "node main.js"
